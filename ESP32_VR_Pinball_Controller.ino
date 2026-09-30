@@ -64,7 +64,7 @@ void setup() {
     }
 
     // Initialize HID
-    hid.begin(DEVICE_NAME, DEVICE_MANUFACTURER);
+hid.begin("X-Arcade", "Xgaming");
 
     // Initialize accelerometer
     setupAccelerometer();
@@ -78,6 +78,7 @@ void setup() {
 
 void loop() {
     const auto currentMillis = millis();
+    hid.updateTransport();
 
     // If change mode button was pressed, cycle through modes
     if (changeModeIRQ) {
@@ -99,7 +100,7 @@ void loop() {
     // Check BLE connection state before processing inputs
     static bool wasConnected = true;
 
-    if (!BleHidController::isConnected()) {
+    if (!BleHidController::isConnected() && !hid.isUsbConnected()) {
         if (wasConnected) {
             wasConnected = false;
             setLedColor(LedColor::RED);
