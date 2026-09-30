@@ -1,6 +1,6 @@
 # ESP32 VR Pinball Controller
 
-A Bluetooth Low Energy (BLE) composite HID controller for VR pinball, with MPU6050 sensor for realistic nudging.
+A BLE and USB HID controller for VR pinball, with MPU6050 sensor for realistic nudging.
 
 ![VR Pinball controller](assets/vrpc.jpg)
 
@@ -22,7 +22,8 @@ HID Keyboard or gamepad mode for compatibility across different games:
 
 ## Features
 
-- Composite BLE HID communication (keyboard + gamepad) using the included HID library
+- BLE composite keyboard/gamepad and native USB keyboard/gamepad HID
+- Automatically selects USB when the host connects during startup; otherwise starts BLE after a 2.5-second detection window
 - 11 buttons (Select, Start, Launch, A, B, X, Y, Left flipper, Left MagnaSave, Right flipper, Right MagnaSave)
 - 4 D-pad input (to navigate in Pinball VR Classic menu)
 - 1 dedicated button for mode cycling (FX, Classic, VPX)
@@ -60,6 +61,7 @@ HID Keyboard or gamepad mode for compatibility across different games:
 | GND         | GND       | Ground               |
 | SDA         | GPIO 8    | I²C data line        |
 | SCL         | GPIO 9    | I²C clock line       |
+| INT         | GPIO 10   | Motion interrupt pin |
 
 #### Button Connections
 
@@ -124,7 +126,9 @@ HID Keyboard or gamepad mode for compatibility across different games:
 
 1. Power on the ESP32
 2. Wait for the device to complete MPU6050 calibration (keep it stationary)
-3. On your VR headset or PC, pair with the BLE device named "VR Pinball controller"
+3. Connect the ESP32-S3's native USB port to a PC with a data-capable USB cable during startup to use USB HID. If no USB host is detected during the startup window, BLE starts automatically; pair with "VR Pinball controller". Reboot to switch transports.
+
+For USB HID, select **Tools -> USB Mode -> USB-OTG (TinyUSB)** in Arduino IDE. The USB cable must be connected to the board's native USB/OTG connector, not a USB-to-serial-only connector. Other ESP32 boards need native USB OTG support to use wired HID.
 
 ### Mode Switching
 
