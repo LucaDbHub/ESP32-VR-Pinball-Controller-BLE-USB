@@ -1,4 +1,16 @@
 #include "BleHidController.h"
+#include "soc/soc_caps.h"
+#include <cstring>
+
+#if SOC_USB_OTG_SUPPORTED && defined(ARDUINO_USB_MODE) && ARDUINO_USB_MODE == 0
+#include "USB.h"
+#include "USBHID.h"
+#define PINBALL_USB_HID_ENABLED 1
+#else
+#define PINBALL_USB_HID_ENABLED 0
+#endif
+
+static constexpr uint32_t USB_DETECTION_WINDOW_MS = 2500;
 
 //@formatter:off
 // Combined report map (keyboard + gamepad)
@@ -97,6 +109,50 @@ static const uint8_t hidReportMapData[] = {
 };
 //@formatter:on
 
+#if PINBALL_USB_HID_ENABLED
+static const uint8_t usbReportMapData[] = {
+    TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(REPORT_ID_KEYBOARD)),
+    TUD_HID_REPORT_DESC_GAMEPAD(HID_REPORT_ID(REPORT_ID_GAMEPAD))
+};
+
+static USBHID usbHid;
+
+struct UsbKeyboardReport
+{
+    uint8_t modifiers;
+    uint8_t reserved;
+    uint8_t keys[6];
+};
+
+struct __attribute__((packed)) UsbGamepadReport
+{
+    int8_t x;
+    int8_t y;
+    int8_t z;
+    int8_t rz;
+    int8_t rx;
+    int8_t ry;
+    uint8_t hat;
+    uint32_t buttons;
+};
+
+static int8_t scaleUsbAxis(const int16_t value) {
+    const int16_t scaled = value / 256;
+    return static_cast<int8_t>(scaled < -127 ? -127 : scaled);
+}
+
+class PinballUsbHidDevice final : public USBHIDDevice
+{
+public:
+    uint16_t _onGetDescriptor(uint8_t* buffer) override {
+        memcpy(buffer, usbReportMapData, sizeof(usbReportMapData));
+        return sizeof(usbReportMapData);
+    }
+};
+
+static PinballUsbHidDevice usbHidDevice;
+#endif
+
 bool BleHidController::_deviceConnected = false;
 
 // Internal callbacks
@@ -118,11 +174,40 @@ BleHidController::BleHidController() = default;
 
 
 void BleHidController::begin(const char* deviceName, const char* deviceManufacturer, const uint16_t vendorId, const uint16_t productId, const uint16_t version) {
-    if (_hidDevice != nullptr) {
-        return; // Already initialized
-    }
+    if (_initialized) return;
+    _initialized = true;
+    _deviceName = deviceName;
+    _deviceManufacturer = deviceManufacturer;
+    _vendorId = vendorId;
+    _productId = productId;
+    _version = version;
+    _transportStartedAt = millis();
 
-    NimBLEDevice::init(deviceName);
+#if PINBALL_USB_HID_ENABLED
+    usbHid.addDevice(&usbHidDevice, sizeof(usbReportMapData));
+    usbHid.begin();
+    USB.begin();
+#else
+    startBle();
+#endif
+}
+
+void BleHidController::updateTransport() {
+    if (!_initialized || _bleStarted) return;
+
+#if PINBALL_USB_HID_ENABLED
+    if (static_cast<bool>(USB)) return;
+    if (millis() - _transportStartedAt < USB_DETECTION_WINDOW_MS) return;
+#endif
+
+    startBle();
+}
+
+void BleHidController::startBle() {
+    if (_bleStarted) return;
+    _bleStarted = true;
+
+    NimBLEDevice::init(_deviceName);
     NimBLEDevice::setPower(BLE_TX_POWER);
     NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND);
     NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
@@ -135,8 +220,8 @@ void BleHidController::begin(const char* deviceName, const char* deviceManufactu
     _server->advertiseOnDisconnect(false);
 
     _hidDevice = new NimBLEHIDDevice(_server);
-    _hidDevice->setManufacturer(deviceManufacturer);
-    _hidDevice->setPnp(PNP_VENDOR_SRC_USB, vendorId, productId, version);
+    _hidDevice->setManufacturer(_deviceManufacturer);
+    _hidDevice->setPnp(PNP_VENDOR_SRC_USB, _vendorId, _productId, _version);
     _hidDevice->setHidInfo(0x00, 0x01);
     _hidDevice->setBatteryLevel(BATTERY_LEVEL);
     _hidDevice->setReportMap(const_cast<uint8_t*>(hidReportMapData), sizeof(hidReportMapData));
@@ -147,12 +232,20 @@ void BleHidController::begin(const char* deviceName, const char* deviceManufactu
     // _hidDevice->startServices(); // Deprecated: Services are now started by the server when start()
 
     NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
-    adv->setName(deviceName);
+    adv->setName(_deviceName);
     adv->addServiceUUID(_hidDevice->getHidService()->getUUID());
     adv->addServiceUUID(_hidDevice->getBatteryService()->getUUID());
     adv->setAppearance(GENERIC_HID); // !HERE Meta Quest 3 doesn't seem to accept HID_GAMEPAD
     adv->enableScanResponse(true);
     adv->start();
+}
+
+bool BleHidController::isUsbConnected() const {
+#if PINBALL_USB_HID_ENABLED
+    return usbHid.ready();
+#else
+    return false;
+#endif
 }
 
 
@@ -161,8 +254,21 @@ void BleHidController::begin(const char* deviceName, const char* deviceManufactu
 // ***************************************************************
 
 void BleHidController::sendKeyboardState() {
-    _kbInputReport->setValue(reinterpret_cast<uint8_t*>(&_kbState), sizeof(_kbState));
-    (void)_kbInputReport->notify();
+    if (_deviceConnected && _kbInputReport != nullptr) {
+        _kbInputReport->setValue(reinterpret_cast<uint8_t*>(&_kbState), sizeof(_kbState));
+        (void)_kbInputReport->notify();
+    }
+#if PINBALL_USB_HID_ENABLED
+    if (usbHid.ready()) {
+        const UsbKeyboardReport report{
+            .modifiers = _kbState.modifiers,
+            .reserved = 0,
+            .keys = {_kbState.keys[0], _kbState.keys[1], _kbState.keys[2],
+                     _kbState.keys[3], _kbState.keys[4], _kbState.keys[5]}
+        };
+        usbHid.SendReport(REPORT_ID_KEYBOARD, &report, sizeof(report));
+    }
+#endif
 }
 
 /**
@@ -171,7 +277,6 @@ void BleHidController::sendKeyboardState() {
  * @param modifier
  */
 void BleHidController::keyModPress(const uint8_t modifier) {
-    if (!_deviceConnected || _kbInputReport == nullptr) return;
     _kbState.modifiers |= modifier;
     sendKeyboardState();
 }
@@ -182,7 +287,6 @@ void BleHidController::keyModPress(const uint8_t modifier) {
  * @param modifier
  */
 void BleHidController::keyModRelease(const uint8_t modifier) {
-    if (!_deviceConnected || _kbInputReport == nullptr) return;
     _kbState.modifiers &= ~modifier;
     sendKeyboardState();
 }
@@ -193,7 +297,7 @@ void BleHidController::keyModRelease(const uint8_t modifier) {
  * @param keycode
  */
 void BleHidController::keyPress(const uint8_t keycode) {
-    if (keycode == KEY_NONE || !_deviceConnected || _kbInputReport == nullptr) return;
+    if (keycode == KEY_NONE) return;
 
     // Verify if key already exists
     for (const unsigned char key : _kbState.keys) {
@@ -217,8 +321,6 @@ void BleHidController::keyPress(const uint8_t keycode) {
  * @param keycode
  */
 void BleHidController::keyRelease(const uint8_t keycode) {
-    if (!_deviceConnected || _kbInputReport == nullptr) return;
-
     // Remove the keycode from the keys array
     for (unsigned char& key : _kbState.keys) {
         if (key == keycode) {
@@ -233,7 +335,6 @@ void BleHidController::keyRelease(const uint8_t keycode) {
  * Clear all active key presses and modifier states and send report
  */
 void BleHidController::keyReleaseAll() {
-    if (!_deviceConnected || _kbInputReport == nullptr) return;
     _kbState = KeyReport{};
     sendKeyboardState();
 }
@@ -244,9 +345,25 @@ void BleHidController::keyReleaseAll() {
 // ***************************************************************
 
 void BleHidController::sendGamepadState() {
-    if (!_deviceConnected || _gpInputReport == nullptr) return;
-    _gpInputReport->setValue(reinterpret_cast<uint8_t*>(&_gpState), sizeof(_gpState));
-    (void)_gpInputReport->notify();
+    if (_deviceConnected && _gpInputReport != nullptr) {
+        _gpInputReport->setValue(reinterpret_cast<uint8_t*>(&_gpState), sizeof(_gpState));
+        (void)_gpInputReport->notify();
+    }
+#if PINBALL_USB_HID_ENABLED
+    if (usbHid.ready()) {
+        const UsbGamepadReport report{
+            .x = scaleUsbAxis(_gpState.leftX),
+            .y = scaleUsbAxis(_gpState.leftY),
+            .z = static_cast<int8_t>((static_cast<uint32_t>(_gpState.lt) * 127) / 1023),
+            .rz = static_cast<int8_t>((static_cast<uint32_t>(_gpState.rt) * 127) / 1023),
+            .rx = scaleUsbAxis(_gpState.rightX),
+            .ry = scaleUsbAxis(_gpState.rightY),
+            .hat = static_cast<uint8_t>(_gpState.dpad == DPAD_CENTERED ? 0 : _gpState.dpad + 1),
+            .buttons = _gpState.buttons
+        };
+        usbHid.SendReport(REPORT_ID_GAMEPAD, &report, sizeof(report));
+    }
+#endif
 }
 
 void BleHidController::buttonPress(const uint16_t button) {
