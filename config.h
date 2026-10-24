@@ -9,10 +9,10 @@
 constexpr uint8_t BTN_SELECT_PIN          = 1;  // "Select" button
 constexpr uint8_t BTN_START_PIN           = 2;  // "Start" button
 constexpr uint8_t BTN_LAUNCH_PIN          = 4;  // Launch button (plunger)
-constexpr uint8_t BTN_A_PIN               = 5;  // "Action A" button (bottom button in the diamond layout)
+constexpr uint8_t BTN_A_PIN               = 13;  // "Action A" button (bottom button in the diamond layout)
 constexpr uint8_t BTN_B_PIN               = 6;  // "Action B" button (right button in the diamond layout)
 constexpr uint8_t BTN_X_PIN               = 7;  // "Action X" button (left button in the diamond layout)
-constexpr uint8_t BTN_Y_PIN               = 15; // "Action Y" button (top button in the diamond layout)
+constexpr uint8_t BTN_Y_PIN               = 5; // "Action Y" button (top button in the diamond layout)
 constexpr uint8_t BTN_LEFT_FLIPPER_PIN    = 42; // Left flipper button
 constexpr uint8_t BTN_LEFT_MAGNASAVE_PIN  = 41; // Left magnasave button
 constexpr uint8_t BTN_RIGHT_FLIPPER_PIN   = 16; // Right flipper button
@@ -21,7 +21,7 @@ constexpr uint8_t DPAD_DOWN_PIN           = 40; // D-Pad down button
 constexpr uint8_t DPAD_UP_PIN             = 39; // D-Pad up button
 constexpr uint8_t DPAD_RIGHT_PIN          = 38; // D-Pad right button
 constexpr uint8_t DPAD_LEFT_PIN           = 37; // D-Pad left button
-constexpr uint8_t CHANGE_MODE_PIN         = 21; // Momentary button to cycle through controller modes (FX, Classic, VPX)
+constexpr uint8_t CHANGE_MODE_PIN         = 14; // Momentary button to cycle through controller modes (FX, Classic, VPX)
 
 
 // #########################################################

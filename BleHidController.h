@@ -181,6 +181,8 @@ public:
     );
 
     static bool isConnected() { return _deviceConnected; }
+    bool isUsbConnected() const;
+    void updateTransport();
 
     // Keyboard API
     void keyModPress(uint8_t modifier);
@@ -202,6 +204,7 @@ public:
     void sendGamepadState();
 
 private:
+    void startBle();
     void sendKeyboardState();
 
     struct KeyReport
@@ -239,6 +242,15 @@ private:
 
     KeyReport _kbState{};
     GamepadReport _gpState{};
+
+    const char* _deviceName{};
+    const char* _deviceManufacturer{};
+    uint16_t _vendorId{};
+    uint16_t _productId{};
+    uint16_t _version{};
+    uint32_t _transportStartedAt{};
+    bool _initialized{};
+    bool _bleStarted{};
 
     class ServerCallbacks;
     friend class ServerCallbacks;
